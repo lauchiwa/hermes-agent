@@ -6,10 +6,12 @@ and implement the required methods.
 """
 
 import asyncio
+import ipaddress
 import logging
 import os
 import random
 import re
+import socket as _socket
 import subprocess
 import sys
 import uuid
@@ -17,6 +19,64 @@ from abc import ABC, abstractmethod
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+
+def utf16_len(s: str) -> int:
+    """Count UTF-16 code units in *s*."""
+    return len(s.encode("utf-16-le")) // 2
+
+
+def _prefix_within_utf16_limit(s: str, limit: int) -> str:
+    """Return the longest prefix of *s* whose UTF-16 length ≤ *limit*."""
+    if utf16_len(s) <= limit:
+        return s
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if utf16_len(s[:mid]) <= limit:
+            lo = mid
+        else:
+            hi = mid - 1
+    return s[:lo]
+
+
+def _custom_unit_to_cp(s: str, budget: int, len_fn) -> int:
+    """Return the largest codepoint offset *n* such that ``len_fn(s[:n]) <= budget``."""
+    if len_fn(s) <= budget:
+        return len(s)
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len_fn(s[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def is_network_accessible(host: str) -> bool:
+    """Return True if *host* would expose the server beyond loopback."""
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_loopback:
+            return False
+        if getattr(addr, "ipv4_mapped", None) and addr.ipv4_mapped.is_loopback:
+            return False
+        return True
+    except ValueError:
+        pass
+
+    try:
+        resolved = _socket.getaddrinfo(
+            host, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM,
+        )
+        for _family, _type, _proto, _canonname, sockaddr in resolved:
+            addr = ipaddress.ip_address(sockaddr[0])
+            if not addr.is_loopback:
+                return True
+        return False
+    except (_socket.gaierror, OSError):
+        return True
 
 
 def _detect_macos_system_proxy() -> str | None:
@@ -1786,7 +1846,11 @@ class BasePlatformAdapter(ABC):
         return content
     
     @staticmethod
-    def truncate_message(content: str, max_length: int = 4096) -> List[str]:
+    def truncate_message(
+        content: str,
+        max_length: int = 4096,
+        len_fn: Optional["Callable[[str], int]"] = None,
+    ) -> List[str]:
         """
         Split a long message into chunks, preserving code block boundaries.
 
@@ -1798,11 +1862,16 @@ class BasePlatformAdapter(ABC):
         Args:
             content: The full message content
             max_length: Maximum length per chunk (platform-specific)
+            len_fn: Optional length function for measuring string length.
+                     Defaults to ``len`` (Unicode code-points).  Pass
+                     ``utf16_len`` for platforms that measure message
+                     length in UTF-16 code units (e.g. Telegram).
 
         Returns:
             List of message chunks
         """
-        if len(content) <= max_length:
+        _len = len_fn or len
+        if _len(content) <= max_length:
             return [content]
 
         INDICATOR_RESERVE = 10   # room for " (XX/XX)"
@@ -1821,22 +1890,33 @@ class BasePlatformAdapter(ABC):
 
             # How much body text we can fit after accounting for the prefix,
             # a potential closing fence, and the chunk indicator.
-            headroom = max_length - INDICATOR_RESERVE - len(prefix) - len(FENCE_CLOSE)
+            headroom = max_length - INDICATOR_RESERVE - _len(prefix) - _len(FENCE_CLOSE)
             if headroom < 1:
                 headroom = max_length // 2
 
             # Everything remaining fits in one final chunk
-            if len(prefix) + len(remaining) <= max_length - INDICATOR_RESERVE:
+            if _len(prefix) + _len(remaining) <= max_length - INDICATOR_RESERVE:
                 chunks.append(prefix + remaining)
                 break
 
-            # Find a natural split point (prefer newlines, then spaces)
-            region = remaining[:headroom]
+            # Find a natural split point (prefer newlines, then spaces).
+            # When _len != len (e.g. utf16_len for Telegram), headroom is
+            # measured in the custom unit.  We need codepoint-based slice
+            # positions that stay within the custom-unit budget.
+            #
+            # _safe_slice_pos() maps a custom-unit budget to the largest
+            # codepoint offset whose custom length ≤ budget.
+            if _len is not len:
+                # Map headroom (custom units) → codepoint slice length
+                _cp_limit = _custom_unit_to_cp(remaining, headroom, _len)
+            else:
+                _cp_limit = headroom
+            region = remaining[:_cp_limit]
             split_at = region.rfind("\n")
-            if split_at < headroom // 2:
+            if split_at < _cp_limit // 2:
                 split_at = region.rfind(" ")
             if split_at < 1:
-                split_at = headroom
+                split_at = _cp_limit
 
             # Avoid splitting inside an inline code span (`...`).
             # If the text before split_at has an odd number of unescaped
@@ -1856,7 +1936,7 @@ class BasePlatformAdapter(ABC):
                     safe_split = candidate.rfind(" ", 0, last_bt)
                     nl_split = candidate.rfind("\n", 0, last_bt)
                     safe_split = max(safe_split, nl_split)
-                    if safe_split > headroom // 4:
+                    if safe_split > _cp_limit // 4:
                         split_at = safe_split
 
             chunk_body = remaining[:split_at]
