@@ -1053,7 +1053,7 @@ def _split_path_input(raw: str) -> tuple[str, str]:
     Supports quoted paths and backslash-escaped spaces so callers can accept
     inputs like:
       /tmp/pic.png describe this
-      ~/storage/shared/My\ Photos/cat.png what is this?
+      ~/storage/shared/My\\ Photos/cat.png what is this?
       "/storage/emulated/0/DCIM/Camera/cat 1.png" summarize
     """
     raw = str(raw or "").strip()
@@ -6357,6 +6357,10 @@ class HermesCLI:
                     self._app.invalidate()
                 self._pending_input.put(transcript)
                 submitted = True
+                # A real transcript counts as successful activity even if
+                # _pending_input is later consumed elsewhere; suppress the
+                # no-speech restart path deterministically.
+                self._no_speech_count = 0
             elif result.get("success"):
                 _cprint(f"{_DIM}No speech detected.{_RST}")
             else:

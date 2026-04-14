@@ -62,19 +62,25 @@ _slack_mod.SLACK_AVAILABLE = True
 from gateway.platforms.slack import SlackAdapter  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture()
 def adapter():
-    config = PlatformConfig(enabled=True, token="xoxb-fake-token")
+    config = PlatformConfig(enabled=True, token="***")
     a = SlackAdapter(config)
     # Mock the Slack app client
     a._app = MagicMock()
     a._app.client = AsyncMock()
     a._bot_user_id = "U_BOT"
+    a._team_bot_user_ids = {"T_TEAM": "U_BOT"}
     a._running = True
+    a._app.client.reactions_add = AsyncMock()
+    a._app.client.reactions_remove = AsyncMock()
+    a._app.client.users_info = AsyncMock(return_value={
+        "user": {"profile": {"display_name": "testuser"}, "real_name": "testuser"}
+    })
+    a._app.client.conversations_info = AsyncMock(return_value={"channel": {"is_im": False}})
+    a._app.client.assistant_threads_setStatus = AsyncMock()
+    a._app.client.chat_postMessage = AsyncMock(return_value={"ts": "1234567890.000001"})
     # Capture events instead of processing them
     a.handle_message = AsyncMock()
     return a
@@ -1060,6 +1066,12 @@ class TestThreadReplyHandling:
         a._bot_user_id = "U_BOT"
         a._team_bot_user_ids = {"T_TEAM": "U_BOT"}
         a._running = True
+        a._app.client.reactions_add = AsyncMock()
+        a._app.client.reactions_remove = AsyncMock()
+        a._app.client.users_info = AsyncMock(return_value={
+            "user": {"profile": {"display_name": "testuser"}, "real_name": "testuser"}
+        })
+        a._app.client.conversations_info = AsyncMock(return_value={"channel": {"is_im": False}})
         a.handle_message = AsyncMock()
         a.set_session_store(mock_session_store)
         return a
@@ -1200,6 +1212,12 @@ class TestAssistantThreadLifecycle:
         a._bot_user_id = "U_BOT"
         a._team_bot_user_ids = {"T_TEAM": "U_BOT"}
         a._running = True
+        a._app.client.reactions_add = AsyncMock()
+        a._app.client.reactions_remove = AsyncMock()
+        a._app.client.users_info = AsyncMock(return_value={
+            "user": {"profile": {"display_name": "testuser"}, "real_name": "testuser"}
+        })
+        a._app.client.conversations_replies = AsyncMock(return_value={"messages": []})
         a.handle_message = AsyncMock()
         a.set_session_store(mock_session_store)
         return a
@@ -1387,6 +1405,13 @@ class TestSlashCommands:
         msg = adapter.handle_message.call_args[0][0]
         assert msg.text == "/reasoning"
 
+
+@pytest.fixture(autouse=True)
+def _clear_asyncmock_leaks():
+    """Run a GC cycle after each test to surface/clear any unawaited AsyncMock coroutines in-test."""
+    yield
+    import gc
+    gc.collect()
 
 # ---------------------------------------------------------------------------
 # TestMessageSplitting

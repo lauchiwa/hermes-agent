@@ -54,12 +54,14 @@ class TestToolProgressCallback:
 
             cb("tool.started", "terminal", "$ ls -la", {"command": "ls -la"})
 
+            coro = mock_rcts.call_args[0][0]
+            coro.close()
+
         # Should have tracked the tool call ID
         assert "terminal" in tool_call_ids
 
         # Should have called run_coroutine_threadsafe
         mock_rcts.assert_called_once()
-        coro = mock_rcts.call_args[0][0]
         # The coroutine should be conn.session_update
         assert mock_conn.session_update.called or coro is not None
 
@@ -77,6 +79,8 @@ class TestToolProgressCallback:
 
             cb("tool.started", "read_file", "Reading /etc/hosts", '{"path": "/etc/hosts"}')
 
+            mock_rcts.call_args[0][0].close()
+
         assert "read_file" in tool_call_ids
 
     def test_handles_non_dict_args(self, mock_conn, event_loop_fixture):
@@ -92,6 +96,8 @@ class TestToolProgressCallback:
             mock_rcts.return_value = future
 
             cb("tool.started", "terminal", "$ echo hi", None)
+
+            mock_rcts.call_args[0][0].close()
 
         assert "terminal" in tool_call_ids
 
@@ -109,14 +115,21 @@ class TestToolProgressCallback:
             mock_rcts.return_value = future
 
             progress_cb("tool.started", "terminal", "$ ls", {"command": "ls"})
+            first_coro = mock_rcts.call_args_list[-1][0][0]
             progress_cb("tool.started", "terminal", "$ pwd", {"command": "pwd"})
+            second_coro = mock_rcts.call_args_list[-1][0][0]
             assert len(tool_call_ids["terminal"]) == 2
 
             step_cb(1, [{"name": "terminal", "result": "ok-1"}])
+            third_coro = mock_rcts.call_args_list[-1][0][0]
             assert len(tool_call_ids["terminal"]) == 1
 
             step_cb(2, [{"name": "terminal", "result": "ok-2"}])
+            fourth_coro = mock_rcts.call_args_list[-1][0][0]
             assert "terminal" not in tool_call_ids
+
+            for coro in (first_coro, second_coro, third_coro, fourth_coro):
+                coro.close()
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +150,8 @@ class TestThinkingCallback:
             mock_rcts.return_value = future
 
             cb("Analyzing the code...")
+
+            mock_rcts.call_args[0][0].close()
 
         mock_rcts.assert_called_once()
 
@@ -172,6 +187,8 @@ class TestStepCallback:
 
             cb(1, [{"name": "terminal", "result": "success"}])
 
+            mock_rcts.call_args[0][0].close()
+
         # Tool should have been removed from tracking
         assert "terminal" not in tool_call_ids
         mock_rcts.assert_called_once()
@@ -202,6 +219,8 @@ class TestStepCallback:
 
             cb(2, ["read_file"])
 
+            mock_rcts.call_args[0][0].close()
+
         assert "read_file" not in tool_call_ids
         mock_rcts.assert_called_once()
 
@@ -222,6 +241,8 @@ class TestStepCallback:
 
             # Provide a result string in the tool info dict
             cb(1, [{"name": "terminal", "result": '{"output": "hello"}'}])
+
+            mock_rcts.call_args[0][0].close()
 
         mock_btc.assert_called_once_with(
             "tc-xyz789", "terminal", result='{"output": "hello"}'
@@ -244,6 +265,8 @@ class TestStepCallback:
 
             cb(1, [{"name": "web_search", "result": None}])
 
+            mock_rcts.call_args[0][0].close()
+
         mock_btc.assert_called_once_with("tc-aaa", "web_search", result=None)
 
 
@@ -265,6 +288,8 @@ class TestMessageCallback:
             mock_rcts.return_value = future
 
             cb("Here is your answer.")
+
+            mock_rcts.call_args[0][0].close()
 
         mock_rcts.assert_called_once()
 

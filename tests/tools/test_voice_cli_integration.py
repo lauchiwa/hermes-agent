@@ -32,6 +32,7 @@ def _make_voice_cli(**overrides):
     cli._voice_tts_done.set()
     cli._pending_input = queue.Queue()
     cli._app = None
+    cli._attached_images = []
     cli.console = SimpleNamespace(width=80)
     for k, v in overrides.items():
         setattr(cli, k, v)
@@ -1089,13 +1090,15 @@ class TestVoiceStopAndTranscribeReal:
     @patch("cli._cprint")
     @patch("cli.os.unlink")
     @patch("cli.os.path.isfile", return_value=True)
+    @patch("cli.threading.Thread")
     @patch("hermes_cli.config.load_config", return_value={"stt": {}})
     @patch("tools.voice_mode.transcribe_recording",
            return_value={"success": True, "transcript": "hello world"})
     @patch("tools.voice_mode.play_beep")
     def test_successful_transcription_queues_input(
-        self, _beep, _tr, _cfg, _isf, _unl, _cp
+        self, _beep, _tr, _cfg, mock_thread, _isf, _unl, _cp
     ):
+        mock_thread.side_effect = AssertionError("should not restart thread on success")
         recorder = MagicMock()
         recorder.stop.return_value = "/tmp/test.wav"
         cli = _make_voice_cli(_voice_recording=True, _voice_recorder=recorder)
@@ -1166,12 +1169,13 @@ class TestVoiceStopAndTranscribeReal:
     @patch("cli._cprint")
     @patch("cli.os.unlink")
     @patch("cli.os.path.isfile", return_value=True)
+    @patch("cli.threading.Thread")
     @patch("hermes_cli.config.load_config", return_value={"stt": {}})
     @patch("tools.voice_mode.transcribe_recording",
            return_value={"success": True, "transcript": "hello"})
     @patch("tools.voice_mode.play_beep")
     def test_continuous_no_restart_on_success(
-        self, _beep, _tr, _cfg, _isf, _unl, _cp
+        self, _beep, _tr, _cfg, mock_thread, _isf, _unl, _cp
     ):
         recorder = MagicMock()
         recorder.stop.return_value = "/tmp/test.wav"
@@ -1179,6 +1183,7 @@ class TestVoiceStopAndTranscribeReal:
                               _voice_continuous=True)
         cli._voice_start_recording = MagicMock()
         cli._voice_stop_and_transcribe()
+        mock_thread.assert_not_called()
         cli._voice_start_recording.assert_not_called()
 
     @patch("cli._cprint")
