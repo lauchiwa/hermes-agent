@@ -7818,14 +7818,24 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
 
     runner = GatewayRunner(config)
     
+    # Track whether a signal initiated the shutdown (vs. internal request).
+    # When an unexpected SIGTERM kills the gateway, we exit non-zero so
+    # systemd's Restart=on-failure revives the process.  systemctl stop
+    # is safe: systemd tracks stop-requested state independently of exit
+    # code, so Restart= never fires for a deliberate stop.
+    _signal_initiated_shutdown = False
+
     # Set up signal handlers
-    def signal_handler():
+    def shutdown_signal_handler():
+        nonlocal _signal_initiated_shutdown
+        _signal_initiated_shutdown = True
+        logger.info("Received SIGTERM/SIGINT — initiating shutdown")
         asyncio.create_task(runner.stop())
     
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, signal_handler)
+            loop.add_signal_handler(sig, shutdown_signal_handler)
         except NotImplementedError:
             pass
     
@@ -7874,6 +7884,24 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         shutdown_mcp_servers()
     except Exception:
         pass
+
+    if runner.exit_code is not None:
+        raise SystemExit(runner.exit_code)
+
+    # When a signal (SIGTERM/SIGINT) caused the shutdown and it wasn't a
+    # planned restart (/restart, /update, SIGUSR1), exit non-zero so
+    # systemd's Restart=on-failure revives the process.  This covers:
+    #   - hermes update killing the gateway mid-work
+    #   - External kill commands
+    #   - WSL2/container runtime sending unexpected signals
+    # systemctl stop is safe: systemd tracks "stop requested" state
+    # independently of exit code, so Restart= never fires for it.
+    if _signal_initiated_shutdown and not runner._restart_requested:
+        logger.info(
+            "Exiting with code 1 (signal-initiated shutdown without restart "
+            "request) so systemd Restart=on-failure can revive the gateway."
+        )
+        return False  # → sys.exit(1) in the caller
 
     return True
 
