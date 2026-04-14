@@ -9,10 +9,30 @@ from dotenv import load_dotenv
 
 
 def _load_dotenv_with_fallback(path: Path, *, override: bool) -> None:
+    # python-dotenv may leave pre-existing shell vars untouched in some test
+    # environments/mocks even with override=True. Load first, then explicitly
+    # apply parsed values so Hermes-managed .env files deterministically win.
     try:
         load_dotenv(dotenv_path=path, override=override, encoding="utf-8")
     except UnicodeDecodeError:
         load_dotenv(dotenv_path=path, override=override, encoding="latin-1")
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = path.read_text(encoding="latin-1")
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if override or key not in os.environ:
+            os.environ[key] = value
 
 
 def load_hermes_dotenv(

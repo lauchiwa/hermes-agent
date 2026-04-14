@@ -20,6 +20,7 @@ import logging
 import os
 import shutil
 import shlex
+import ssl
 import stat
 import base64
 import hashlib
@@ -776,6 +777,7 @@ def is_provider_explicitly_configured(provider_id: str) -> bool:
     # 3. Check provider-specific env vars
     # Exclude CLAUDE_CODE_OAUTH_TOKEN — it's set by Claude Code itself,
     # not by the user explicitly configuring anthropic in Hermes.
+    # Ambient env vars still count as explicit user configuration here.
     _IMPLICIT_ENV_VARS = {"CLAUDE_CODE_OAUTH_TOKEN"}
     pconfig = PROVIDER_REGISTRY.get(normalized)
     if pconfig and pconfig.auth_type == "api_key":
@@ -1495,7 +1497,7 @@ def _resolve_verify(
     insecure: Optional[bool] = None,
     ca_bundle: Optional[str] = None,
     auth_state: Optional[Dict[str, Any]] = None,
-) -> bool | str:
+) -> bool | ssl.SSLContext:
     tls_state = auth_state.get("tls") if isinstance(auth_state, dict) else {}
     tls_state = tls_state if isinstance(tls_state, dict) else {}
 
@@ -1513,7 +1515,7 @@ def _resolve_verify(
     if effective_insecure:
         return False
     if effective_ca:
-        return str(effective_ca)
+        return ssl.create_default_context(cafile=str(effective_ca))
     return True
 
 
