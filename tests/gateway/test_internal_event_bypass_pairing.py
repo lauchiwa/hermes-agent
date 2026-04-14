@@ -211,6 +211,12 @@ async def test_non_internal_event_without_user_triggers_pairing(monkeypatch, tmp
     monkeypatch.delenv("GATEWAY_ALLOWED_USERS", raising=False)
 
     runner = GatewayRunner(GatewayConfig())
+    # Force a fresh pairing directory so prior tests cannot affect pending/rate-limit state.
+    from gateway.pairing import PairingStore
+    isolated_pairing_dir = tmp_path / "pairing"
+    isolated_pairing_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("gateway.pairing.PAIRING_DIR", isolated_pairing_dir)
+    runner.pairing_store = PairingStore()
     adapter = SimpleNamespace(send=AsyncMock())
     runner.adapters[Platform.DISCORD] = adapter
 

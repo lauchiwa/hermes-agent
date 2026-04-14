@@ -18,7 +18,11 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gateway.config import PlatformConfig
-from gateway.platforms.api_server import APIServerAdapter, cors_middleware
+from gateway.platforms.api_server import APIServerAdapter, _API_SERVER_ADAPTER_KEY, body_limit_middleware, cors_middleware
+
+
+def _attach_adapter(app: web.Application, adapter: APIServerAdapter) -> None:
+    app[_API_SERVER_ADAPTER_KEY] = adapter
 
 
 # ---------------------------------------------------------------------------
@@ -48,8 +52,8 @@ def _make_adapter(api_key: str = "") -> APIServerAdapter:
 
 def _create_app(adapter: APIServerAdapter) -> web.Application:
     """Create the aiohttp app with jobs routes registered."""
-    app = web.Application(middlewares=[cors_middleware])
-    app["api_server_adapter"] = adapter
+    app = web.Application(middlewares=[mw for mw in (body_limit_middleware, cors_middleware) if mw is not None])
+    _attach_adapter(app, adapter)
     # Register only job routes (plus health for sanity)
     app.router.add_get("/health", adapter._handle_health)
     app.router.add_get("/api/jobs", adapter._handle_list_jobs)

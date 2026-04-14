@@ -25,12 +25,18 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.api_server import (
     APIServerAdapter,
     ResponseStore,
+    _API_SERVER_ADAPTER_KEY,
     _CORS_HEADERS,
     _derive_chat_session_id,
+    body_limit_middleware,
     check_api_server_requirements,
     cors_middleware,
     security_headers_middleware,
 )
+
+
+def _attach_adapter(app: web.Application, adapter: APIServerAdapter) -> None:
+    app[_API_SERVER_ADAPTER_KEY] = adapter
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +222,9 @@ def _make_adapter(api_key: str = "", cors_origins=None) -> APIServerAdapter:
 
 def _create_app(adapter: APIServerAdapter) -> web.Application:
     """Create the aiohttp app from the adapter (without starting the full server)."""
-    mws = [mw for mw in (cors_middleware, security_headers_middleware) if mw is not None]
+    mws = [mw for mw in (body_limit_middleware, cors_middleware, security_headers_middleware) if mw is not None]
     app = web.Application(middlewares=mws)
-    app["api_server_adapter"] = adapter
+    _attach_adapter(app, adapter)
     app.router.add_get("/health", adapter._handle_health)
     app.router.add_get("/v1/health", adapter._handle_health)
     app.router.add_get("/v1/models", adapter._handle_models)

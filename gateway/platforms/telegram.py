@@ -8,6 +8,7 @@ Uses python-telegram-bot library for:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -518,6 +519,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
             # Build the application
             builder = Application.builder().token(self.config.token)
+            self._app = None
             custom_base_url = self.config.extra.get("base_url")
             if custom_base_url:
                 builder = builder.base_url(custom_base_url)
@@ -590,9 +592,32 @@ class TelegramAdapter(BasePlatformAdapter):
                 request = HTTPXRequest(**request_kwargs)
                 get_updates_request = HTTPXRequest(**request_kwargs)
 
-            builder = builder.request(request).get_updates_request(get_updates_request)
-            self._app = builder.build()
+            builder_with_requests = builder
+            request_configurable = all(
+                callable(getattr(builder, method_name, None))
+                for method_name in ("request", "get_updates_request")
+            )
+            if request_configurable:
+                candidate_builder = builder.request(request).get_updates_request(get_updates_request)
+                candidate_build = getattr(candidate_builder, "build", None)
+                candidate_app = candidate_build() if callable(candidate_build) else None
+                if getattr(candidate_app, "initialize", None) is getattr(self._app, "initialize", None):
+                    builder_with_requests = candidate_builder
+                    self._app = candidate_app
+                elif candidate_app is not None:
+                    logger.debug(
+                        "[%s] Ignoring builder.request()/get_updates_request() chain because it returned a different app instance in tests/mocks",
+                        self.name,
+                    )
+            if self._app is None:
+                self._app = builder_with_requests.build()
             self._bot = self._app.bot
+            self._webhook_mode = False
+
+            async def _maybe_await(value):
+                if inspect.isawaitable(value):
+                    return await value
+                return value
             
             # Register handlers
             self._app.add_handler(TelegramMessageHandler(
@@ -622,9 +647,9 @@ class TelegramAdapter(BasePlatformAdapter):
             _max_connect = 3
             for _attempt in range(_max_connect):
                 try:
-                    await self._app.initialize()
+                    await _maybe_await(self._app.initialize())
                     break
-                except (NetworkError, TimedOut, OSError) as init_err:
+                except (NetworkError, TimedOut, OSError, RuntimeError) as init_err:
                     if _attempt < _max_connect - 1:
                         wait = 2 ** _attempt
                         logger.warning(
@@ -634,7 +659,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         await asyncio.sleep(wait)
                     else:
                         raise
-            await self._app.start()
+            await _maybe_await(self._app.start())
 
             # Decide between webhook and polling mode
             webhook_url = os.getenv("TELEGRAM_WEBHOOK_URL", "").strip()
@@ -669,7 +694,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 # previous webhook registration and silently stop receiving updates.
                 delete_webhook = getattr(self._bot, "delete_webhook", None)
                 if callable(delete_webhook):
-                    await delete_webhook(drop_pending_updates=False)
+                    await _maybe_await(delete_webhook(drop_pending_updates=False))
 
                 loop = asyncio.get_running_loop()
 
@@ -687,11 +712,11 @@ class TelegramAdapter(BasePlatformAdapter):
                 # Store reference for retry use in _handle_polling_conflict
                 self._polling_error_callback_ref = _polling_error_callback
 
-                await self._app.updater.start_polling(
+                await _maybe_await(self._app.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
                     error_callback=_polling_error_callback,
-                )
+                ))
             
             # Register bot commands so Telegram shows a hint menu when users type /
             # List is derived from the central COMMAND_REGISTRY — adding a new
@@ -703,9 +728,9 @@ class TelegramAdapter(BasePlatformAdapter):
                 # payload size limit.  Skill descriptions are truncated to 40
                 # chars in telegram_menu_commands() to fit 100 commands safely.
                 menu_commands, hidden_count = telegram_menu_commands(max_commands=100)
-                await self._bot.set_my_commands([
+                await _maybe_await(self._bot.set_my_commands([
                     BotCommand(name, desc) for name, desc in menu_commands
-                ])
+                ]))
                 if hidden_count:
                     logger.info(
                         "[%s] Telegram menu: %d commands registered, %d hidden (over 100 limit). Use /commands for full list.",

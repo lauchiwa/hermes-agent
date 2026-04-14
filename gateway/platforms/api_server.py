@@ -169,6 +169,8 @@ class ResponseStore:
 # CORS middleware
 # ---------------------------------------------------------------------------
 
+_API_SERVER_ADAPTER_KEY = web.AppKey("api_server_adapter", "APIServerAdapter")
+
 _CORS_HEADERS = {
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key",
@@ -179,7 +181,7 @@ if AIOHTTP_AVAILABLE:
     @web.middleware
     async def cors_middleware(request, handler):
         """Add CORS headers for explicitly allowed origins; handle OPTIONS preflight."""
-        adapter = request.app.get("api_server_adapter")
+        adapter = request.app.get(_API_SERVER_ADAPTER_KEY)
         origin = request.headers.get("Origin", "")
         cors_headers = None
         if adapter is not None:
@@ -1684,7 +1686,7 @@ class APIServerAdapter(BasePlatformAdapter):
         try:
             mws = [mw for mw in (cors_middleware, body_limit_middleware, security_headers_middleware) if mw is not None]
             self._app = web.Application(middlewares=mws)
-            self._app["api_server_adapter"] = self
+            self._app[_API_SERVER_ADAPTER_KEY] = self
             self._app.router.add_get("/health", self._handle_health)
             self._app.router.add_get("/v1/health", self._handle_health)
             self._app.router.add_get("/v1/models", self._handle_models)

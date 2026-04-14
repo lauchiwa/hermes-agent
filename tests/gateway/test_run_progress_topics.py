@@ -91,6 +91,7 @@ class LongPreviewAgent:
 
 def _make_runner(adapter):
     gateway_run = importlib.import_module("gateway.run")
+    import model_tools  # ensure tool registry is populated for get_tool_emoji()
     GatewayRunner = gateway_run.GatewayRunner
 
     runner = object.__new__(GatewayRunner)
@@ -144,7 +145,7 @@ async def test_run_agent_progress_stays_in_originating_topic(monkeypatch, tmp_pa
     assert adapter.sent == [
         {
             "chat_id": "-1001",
-            "content": '⚙️ terminal: "pwd"',
+            "content": '💻 terminal: "pwd"',
             "reply_to": None,
             "metadata": {"thread_id": "17585"},
         }

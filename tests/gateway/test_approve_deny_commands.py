@@ -70,11 +70,14 @@ def _make_runner():
 def _clear_approval_state():
     """Reset all module-level approval state between tests."""
     from tools import approval as mod
+    from tools import tirith_security as tirith_mod
     mod._gateway_queues.clear()
     mod._gateway_notify_cbs.clear()
     mod._session_approved.clear()
     mod._permanent_approved.clear()
     mod._pending.clear()
+    tirith_mod._resolved_path = tirith_mod._INSTALL_FAILED
+    tirith_mod._install_failure_reason = "test_disabled"
 
 
 # ------------------------------------------------------------------
