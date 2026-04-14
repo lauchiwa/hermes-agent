@@ -1697,6 +1697,12 @@ class FeishuAdapter(BasePlatformAdapter):
             "chat_id": chat_id,
             "name": chat_id,
             "type": "dm",
+            "raw_type": None,
+            "owner_id": None,
+            "chat_status": None,
+            "tenant_key": None,
+            "avatar": None,
+            "description": None,
         }
         if not self._client:
             return fallback
@@ -1715,12 +1721,27 @@ class FeishuAdapter(BasePlatformAdapter):
                 return fallback
 
             data = getattr(response, "data", None)
-            raw_chat_type = str(getattr(data, "chat_type", "") or "").strip().lower()
+            data_dict = self._coerce_mapping(data)
+            name = self._first_present_value(data, data_dict, "name", "chat_name")
+            raw_chat_type = str(
+                self._first_present_value(data, data_dict, "chat_type", "chat_mode", default="") or ""
+            ).strip().lower()
+            owner_id = self._first_present_value(data, data_dict, "owner_id", "owner_open_id", "owner_user_id")
+            chat_status = self._first_present_value(data, data_dict, "chat_status", "status")
+            tenant_key = self._first_present_value(data, data_dict, "tenant_key")
+            avatar = self._first_present_value(data, data_dict, "avatar", "avatar_url")
+            description = self._first_present_value(data, data_dict, "description")
+
             info = {
                 "chat_id": chat_id,
-                "name": str(getattr(data, "name", None) or chat_id),
+                "name": str(name or chat_id),
                 "type": self._map_chat_type(raw_chat_type),
                 "raw_type": raw_chat_type or None,
+                "owner_id": owner_id,
+                "chat_status": chat_status,
+                "tenant_key": tenant_key,
+                "avatar": avatar,
+                "description": description,
             }
             self._chat_info_cache[chat_id] = info
             return dict(info)
@@ -2858,6 +2879,27 @@ class FeishuAdapter(BasePlatformAdapter):
         if ext in _IMAGE_EXTENSIONS:
             return FeishuAdapter._default_image_media_type(ext)
         return ""
+
+    @staticmethod
+    def _coerce_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if value is None:
+            return {}
+        mapping = getattr(value, "__dict__", None)
+        if isinstance(mapping, dict):
+            return mapping
+        return {}
+
+    @classmethod
+    def _first_present_value(cls, obj: Any, mapping: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+        for key in keys:
+            value = getattr(obj, key, None)
+            if value is not None:
+                return value
+            if key in mapping and mapping[key] is not None:
+                return mapping[key]
+        return default
 
     @staticmethod
     def _map_chat_type(raw_chat_type: str) -> str:

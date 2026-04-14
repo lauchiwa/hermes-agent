@@ -6,15 +6,27 @@ import os
 import tempfile
 import time
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-try:
-    import lark_oapi
-    _HAS_LARK_OAPI = True
-except ImportError:
-    _HAS_LARK_OAPI = False
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"websockets\.InvalidStatusCode is deprecated",
+        category=DeprecationWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"websockets\.legacy is deprecated.*",
+        category=DeprecationWarning,
+    )
+    try:
+        import lark_oapi
+        _HAS_LARK_OAPI = True
+    except ImportError:
+        _HAS_LARK_OAPI = False
 
 
 def _mock_event_dispatcher_builder(mock_handler_class):
@@ -505,6 +517,30 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
         )
 
     @patch.dict(os.environ, {}, clear=True)
+    def test_get_chat_info_returns_stable_fallback_shape_without_client(self):
+        from gateway.config import PlatformConfig
+        from gateway.platforms.feishu import FeishuAdapter
+
+        adapter = FeishuAdapter(PlatformConfig())
+
+        info = asyncio.run(adapter.get_chat_info("oc_fallback"))
+
+        self.assertEqual(
+            info,
+            {
+                "chat_id": "oc_fallback",
+                "name": "oc_fallback",
+                "type": "dm",
+                "raw_type": None,
+                "owner_id": None,
+                "chat_status": None,
+                "tenant_key": None,
+                "avatar": None,
+                "description": None,
+            },
+        )
+
+    @patch.dict(os.environ, {}, clear=True)
     def test_get_chat_info_uses_real_feishu_chat_api(self):
         from gateway.config import PlatformConfig
         from gateway.platforms.feishu import FeishuAdapter
@@ -538,6 +574,60 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
         self.assertEqual(info["chat_id"], "oc_chat")
         self.assertEqual(info["name"], "Hermes Group")
         self.assertEqual(info["type"], "group")
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_get_chat_info_supports_flattened_chat_payload_fields(self):
+        from gateway.config import PlatformConfig
+        from gateway.platforms.feishu import FeishuAdapter
+
+        adapter = FeishuAdapter(PlatformConfig())
+
+        class _FlatChatPayload(dict):
+            @property
+            def __dict__(self):
+                return dict(self)
+
+        class _ChatAPI:
+            def get(self, request):
+                self.request = request
+                return SimpleNamespace(
+                    success=lambda: True,
+                    data=_FlatChatPayload(
+                        chat_name="老板私聊",
+                        chat_mode="p2p",
+                        owner_id="ou_owner",
+                        chat_status="normal",
+                        tenant_key="tenant-demo",
+                        avatar="https://example.com/avatar.png",
+                        description="直属沟通",
+                    ),
+                )
+
+        chat_api = _ChatAPI()
+        adapter._client = SimpleNamespace(
+            im=SimpleNamespace(
+                v1=SimpleNamespace(
+                    chat=chat_api,
+                )
+            )
+        )
+
+        async def _direct(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("gateway.platforms.feishu.asyncio.to_thread", side_effect=_direct):
+            info = asyncio.run(adapter.get_chat_info("oc_dm"))
+
+        self.assertEqual(chat_api.request.chat_id, "oc_dm")
+        self.assertEqual(info["chat_id"], "oc_dm")
+        self.assertEqual(info["name"], "老板私聊")
+        self.assertEqual(info["type"], "dm")
+        self.assertEqual(info["raw_type"], "p2p")
+        self.assertEqual(info["owner_id"], "ou_owner")
+        self.assertEqual(info["chat_status"], "normal")
+        self.assertEqual(info["tenant_key"], "tenant-demo")
+        self.assertEqual(info["avatar"], "https://example.com/avatar.png")
+        self.assertEqual(info["description"], "直属沟通")
 
 class TestAdapterModule(unittest.TestCase):
     def test_adapter_requirement_helper_exists(self):
