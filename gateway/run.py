@@ -3954,6 +3954,7 @@ class GatewayRunner:
     async def _handle_personality_command(self, event: MessageEvent) -> str:
         """Handle /personality command - list or set a personality."""
         import yaml
+        from hermes_constants import display_hermes_home
 
         args = event.get_command_args().strip().lower()
         config_path = _hermes_home / 'config.yaml'
@@ -3971,7 +3972,7 @@ class GatewayRunner:
             personalities = {}
 
         if not personalities:
-            return "No personalities configured in `~/.hermes/config.yaml`"
+            return f"No personalities configured in `{display_hermes_home()}/config.yaml`"
 
         if not args:
             lines = ["🎭 **Available Personalities**\n"]
