@@ -1814,7 +1814,7 @@ def _resolve_task_provider_model(
     model: str = None,
     base_url: str = None,
     api_key: str = None,
-) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[str, Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Determine provider + model for a call.
 
     Priority:
@@ -1823,7 +1823,7 @@ def _resolve_task_provider_model(
       3. Config file (auxiliary.{task}.* or compression.*)
       4. "auto" (full auto-detection chain)
 
-    Returns (provider, model, base_url, api_key) where model may be None
+    Returns (provider, model, base_url, api_key, api_mode) where model may be None
     (use provider default). When base_url is set, provider is forced to
     "custom" and the task uses that direct endpoint.
     """
@@ -1832,6 +1832,7 @@ def _resolve_task_provider_model(
     cfg_model = None
     cfg_base_url = None
     cfg_api_key = None
+    cfg_api_mode = None
 
     if task:
         try:
@@ -1848,6 +1849,7 @@ def _resolve_task_provider_model(
         cfg_model = str(task_config.get("model", "")).strip() or None
         cfg_base_url = str(task_config.get("base_url", "")).strip() or None
         cfg_api_key = str(task_config.get("api_key", "")).strip() or None
+        cfg_api_mode = str(task_config.get("api_mode", "")).strip() or None
 
         # Backwards compat: compression section has its own keys.
         # The auxiliary.compression defaults to provider="auto", so treat
@@ -1864,27 +1866,27 @@ def _resolve_task_provider_model(
     resolved_model = model or env_model or cfg_model
 
     if base_url:
-        return "custom", resolved_model, base_url, api_key
+        return "custom", resolved_model, base_url, api_key, cfg_api_mode
     if provider:
-        return provider, resolved_model, base_url, api_key
+        return provider, resolved_model, base_url, api_key, cfg_api_mode
 
     if task:
         env_base_url = _get_auxiliary_env_override(task, "BASE_URL")
         env_api_key = _get_auxiliary_env_override(task, "API_KEY")
         if env_base_url:
-            return "custom", resolved_model, env_base_url, env_api_key or cfg_api_key
+            return "custom", resolved_model, env_base_url, env_api_key or cfg_api_key, cfg_api_mode
 
         env_provider = _get_auxiliary_provider(task)
         if env_provider != "auto":
-            return env_provider, resolved_model, None, None
+            return env_provider, resolved_model, None, None, cfg_api_mode
 
         if cfg_base_url:
-            return "custom", resolved_model, cfg_base_url, cfg_api_key
+            return "custom", resolved_model, cfg_base_url, cfg_api_key, cfg_api_mode
         if cfg_provider and cfg_provider != "auto":
-            return cfg_provider, resolved_model, None, None
-        return "auto", resolved_model, None, None
+            return cfg_provider, resolved_model, None, None, cfg_api_mode
+        return "auto", resolved_model, None, None, cfg_api_mode
 
-    return "auto", resolved_model, None, None
+    return "auto", resolved_model, None, None, cfg_api_mode
 
 
 _DEFAULT_AUX_TIMEOUT = 30.0
@@ -1994,7 +1996,7 @@ def call_llm(
     Raises:
         RuntimeError: If no provider is configured.
     """
-    resolved_provider, resolved_model, resolved_base_url, resolved_api_key = _resolve_task_provider_model(
+    resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
 
     if task == "vision":
@@ -2188,7 +2190,7 @@ async def async_call_llm(
 
     Same as call_llm() but async. See call_llm() for full documentation.
     """
-    resolved_provider, resolved_model, resolved_base_url, resolved_api_key = _resolve_task_provider_model(
+    resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
 
     if task == "vision":
