@@ -641,6 +641,9 @@ class AIAgent:
             prefill_messages (List[Dict]): Messages to prepend to conversation history as prefilled context.
                 Useful for injecting a few-shot example or priming the model's response style.
                 Example: [{"role": "user", "content": "Hi!"}, {"role": "assistant", "content": "Hello!"}]
+                NOTE: Anthropic Sonnet 4.6+ and Opus 4.6+ reject a conversation that ends on an
+                assistant-role message (400 error).  For those models use structured outputs or
+                output_config.format instead of a trailing-assistant prefill.
             platform (str): The interface platform the user is on (e.g. "cli", "telegram", "discord", "whatsapp").
                 Used to inject platform-specific formatting hints into the system prompt.
             skip_context_files (bool): If True, skip auto-injection of SOUL.md, AGENTS.md, and .cursorrules
@@ -4360,6 +4363,22 @@ class AIAgent:
             client = CopilotACPClient(**client_kwargs)
             logger.info(
                 "Copilot ACP client created (%s, shared=%s) %s",
+                reason,
+                shared,
+                self._client_log_context(),
+            )
+            return client
+        if self.provider == "google-gemini-cli" or str(client_kwargs.get("base_url", "")).startswith("cloudcode-pa://"):
+            from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+
+            # Strip OpenAI-specific kwargs the Gemini client doesn't accept
+            safe_kwargs = {
+                k: v for k, v in client_kwargs.items()
+                if k in {"api_key", "base_url", "default_headers", "project_id", "timeout"}
+            }
+            client = GeminiCloudCodeClient(**safe_kwargs)
+            logger.info(
+                "Gemini Cloud Code Assist client created (%s, shared=%s) %s",
                 reason,
                 shared,
                 self._client_log_context(),
