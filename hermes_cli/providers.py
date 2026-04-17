@@ -88,11 +88,11 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         base_url_env_var="KIMI_BASE_URL",
     ),
     "minimax": HermesOverlay(
-        transport="openai_chat",
+        transport="anthropic_messages",
         base_url_env_var="MINIMAX_BASE_URL",
     ),
     "minimax-cn": HermesOverlay(
-        transport="openai_chat",
+        transport="anthropic_messages",
         base_url_env_var="MINIMAX_CN_BASE_URL",
     ),
     "deepseek": HermesOverlay(
@@ -126,6 +126,24 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="openai_chat",
         is_aggregator=True,
         base_url_env_var="HF_BASE_URL",
+    ),
+    "xai": HermesOverlay(
+        transport="codex_responses",
+        base_url_override="https://api.x.ai/v1",
+        base_url_env_var="XAI_BASE_URL",
+    ),
+    "xiaomi": HermesOverlay(
+        transport="openai_chat",
+        base_url_env_var="XIAOMI_BASE_URL",
+    ),
+    "arcee": HermesOverlay(
+        transport="openai_chat",
+        base_url_override="https://api.arcee.ai/api/v1",
+        base_url_env_var="ARCEE_BASE_URL",
+    ),
+    "ollama-cloud": HermesOverlay(
+        transport="openai_chat",
+        base_url_env_var="OLLAMA_BASE_URL",
     ),
 }
 
@@ -163,9 +181,15 @@ ALIASES: Dict[str, str] = {
     "z.ai": "zai",
     "zhipu": "zai",
 
+    # xai
+    "x-ai": "xai",
+    "x.ai": "xai",
+    "grok": "xai",
+
     # kimi-for-coding (models.dev ID)
     "kimi": "kimi-for-coding",
     "kimi-coding": "kimi-for-coding",
+    "kimi-coding-cn": "kimi-for-coding",
     "moonshot": "kimi-for-coding",
 
     # minimax-cn
@@ -213,11 +237,25 @@ ALIASES: Dict[str, str] = {
     "hugging-face": "huggingface",
     "huggingface-hub": "huggingface",
 
+    # xiaomi
+    "mimo": "xiaomi",
+    "xiaomi-mimo": "xiaomi",
+
+    # bedrock
+    "aws": "bedrock",
+    "aws-bedrock": "bedrock",
+    "amazon-bedrock": "bedrock",
+    "amazon": "bedrock",
+
+    # arcee
+    "arcee-ai": "arcee",
+    "arceeai": "arcee",
+
     # Local server aliases → virtual "local" concept (resolved via user config)
     "lmstudio": "lmstudio",
     "lm-studio": "lmstudio",
     "lm_studio": "lmstudio",
-    "ollama": "ollama-cloud",
+    "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
     "vllm": "local",
     "llamacpp": "local",
     "llama.cpp": "local",
@@ -233,7 +271,10 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "nous": "Nous Portal",
     "openai-codex": "OpenAI Codex",
     "copilot-acp": "GitHub Copilot ACP",
+    "xiaomi": "Xiaomi MiMo",
     "local": "Local endpoint",
+    "bedrock": "AWS Bedrock",
+    "ollama-cloud": "Ollama Cloud",
 }
 
 
@@ -243,6 +284,7 @@ TRANSPORT_TO_API_MODE: Dict[str, str] = {
     "openai_chat": "chat_completions",
     "anthropic_messages": "anthropic_messages",
     "codex_responses": "codex_responses",
+    "bedrock_converse": "bedrock_converse",
 }
 
 
@@ -341,6 +383,7 @@ def get_label(provider_id: str) -> str:
 
 
 
+
 def is_aggregator(provider: str) -> bool:
     """Return True when the provider is a multi-model aggregator."""
     pdef = get_provider(provider)
@@ -359,6 +402,10 @@ def determine_api_mode(provider: str, base_url: str = "") -> str:
     if pdef is not None:
         return TRANSPORT_TO_API_MODE.get(pdef.transport, "chat_completions")
 
+    # Direct provider checks for providers not in HERMES_OVERLAYS
+    if provider == "bedrock":
+        return "bedrock_converse"
+
     # URL-based heuristics for custom / unknown providers
     if base_url:
         url_lower = base_url.rstrip("/").lower()
@@ -366,6 +413,8 @@ def determine_api_mode(provider: str, base_url: str = "") -> str:
             return "anthropic_messages"
         if "api.openai.com" in url_lower:
             return "codex_responses"
+        if "bedrock-runtime" in url_lower and "amazonaws.com" in url_lower:
+            return "bedrock_converse"
 
     return "chat_completions"
 

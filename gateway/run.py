@@ -2066,6 +2066,19 @@ class GatewayRunner:
                         adapter._pending_messages[_quick_key] = event
                 return None
 
+            if source.platform == Platform.TELEGRAM and event.message_type == MessageType.TEXT:
+                logger.debug("PRIORITY telegram text follow-up for session %s — queueing without interrupt", _quick_key[:20])
+                adapter = self.adapters.get(source.platform)
+                if adapter:
+                    from gateway.platforms.base import merge_pending_message_event
+                    merge_pending_message_event(
+                        adapter._pending_messages,
+                        _quick_key,
+                        event,
+                        merge_text=True,
+                    )
+                return None
+
             running_agent = self._running_agents.get(_quick_key)
             if running_agent is _AGENT_PENDING_SENTINEL:
                 # Agent is being set up but not ready yet.
